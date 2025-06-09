@@ -11,8 +11,11 @@ from config.constants import (
     EXTREME_SCALER,
     MIN_UNIQUE_NUM_VALUES,
     OUTLIER_RATIO,
+    SEED,
 )
 from config.types import ArrayLike, MatrixLike
+
+rng = np.random.default_rng(seed=SEED)
 
 
 class OneClassWrapper(BaseEstimator, ClassifierMixin):
@@ -77,12 +80,12 @@ class OneClassWrapper(BaseEstimator, ClassifierMixin):
 
         outliers = np.empty(n_samples)
 
-        lower_outliers = np.random.uniform(
+        lower_outliers = rng.uniform(
             low=min_val - scale,
             high=min_val + range_val * self.extend_factor,
             size=n_samples // 2,
         )
-        upper_outliers = np.random.uniform(
+        upper_outliers = rng.uniform(
             low=max_val - range_val * self.extend_factor,
             high=max_val + scale,
             size=n_samples - (n_samples // 2),
@@ -91,7 +94,7 @@ class OneClassWrapper(BaseEstimator, ClassifierMixin):
         outliers[: len(lower_outliers)] = lower_outliers
         outliers[len(lower_outliers) :] = upper_outliers
 
-        np.random.shuffle(outliers)
+        rng.shuffle(outliers)
         return outliers
 
     def _generate_categorical_outliers(
@@ -108,7 +111,7 @@ class OneClassWrapper(BaseEstimator, ClassifierMixin):
         """
         unique_vals = col.unique()
         all_options = unique_vals
-        return np.random.choice(all_options, size=n_samples)
+        return rng.choice(all_options, size=n_samples)
 
     def _generate_outliers(self, X: pd.DataFrame) -> pd.DataFrame:
         """Generates an outlier dataset based on the input features.
