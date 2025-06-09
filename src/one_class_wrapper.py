@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 from sklearn.base import BaseEstimator, ClassifierMixin
 from sklearn.calibration import LabelEncoder
-from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
+from sklearn.metrics import confusion_matrix, f1_score, precision_score, recall_score
 from sklearn.utils.validation import check_is_fitted
 
 from config.constants import (
@@ -198,36 +198,43 @@ class OneClassWrapper(BaseEstimator, ClassifierMixin):
         return self.model.predict_proba(X_encoded.values)
 
     def score(self, X: MatrixLike, y: MatrixLike | ArrayLike) -> float:
-        """Calculates the accuracy score of the model.
+        """Calculates the F1-score of the model.
 
         Args:
             X (MatrixLike): Input features.
             y (MatrixLike | ArrayLike): True labels.
 
         Returns:
-            float: Accuracy score.
+            float: F1-score.
         """
-        return self.evaluate(X, y)["accuracy"]
+        return self.evaluate(X, y)["f1"]
 
     def evaluate(self, X: MatrixLike, y: MatrixLike | ArrayLike) -> dict:
-        """Evaluates the model using accuracy, precision, recall, and F1-score.
+        """Evaluates the model using precision, recall, F1-score, and false positive rate.
+
+        Includes confusion matrix components: TP, FP, FN, TN.
 
         Args:
             X (MatrixLike): Input features.
             y (MatrixLike | ArrayLike): True labels.
 
         Returns:
-            dict: Dictionary with evaluation metrics.
+            dict: Dictionary with evaluation metrics and confusion matrix components.
         """
         check_is_fitted(self, "is_fitted_")
         if not isinstance(X, pd.DataFrame):
             X = pd.DataFrame(X)
         if isinstance(y, (pd.Series, list)):
             y = np.array(y)
+
         y_pred = self.predict(X)
+
+        tn, fp, _, _ = confusion_matrix(y, y_pred, labels=[1, 0]).ravel()
+        fpr = fp / (fp + tn) if (fp + tn) > 0 else 0.0
+
         return {
-            "accuracy": accuracy_score(y, y_pred),
             "precision": precision_score(y, y_pred),
             "recall": recall_score(y, y_pred),
             "f1": f1_score(y, y_pred),
+            "fpr": fpr,
         }

@@ -138,7 +138,7 @@ def plot_inlier_outlier_counts(results: dict) -> PlotlyFigure:
 
 def plot_evaluation_metrics(results: dict) -> PlotlyFigure:
     """
-    Plots grouped bar charts of evaluation metrics (accuracy, precision, recall, f1) per model using Plotly.
+    Plots grouped bar charts of evaluation metrics (precision, recall, f1, fpr) per model using Plotly.
 
     Args:
         results (dict): Dictionary where each key is a model name and value is a dictionary with 'metrics'.
@@ -146,20 +146,21 @@ def plot_evaluation_metrics(results: dict) -> PlotlyFigure:
     Returns:
         PlotlyFigure: Interactive grouped bar chart of evaluation metrics.
     """
-    metrics = ["accuracy", "precision", "recall", "f1"]
+    metrics = ["precision", "recall", "f1", "fpr"]
     models = list(results.keys())
 
     fig = go.Figure()
 
     for metric in metrics:
-        values = [results[model]["metrics"][metric] for model in models]
+        values = [results[model]["metrics"].get(metric, 0.0) for model in models]
         fig.add_trace(
             go.Bar(
                 x=models,
                 y=values,
-                name=metric.capitalize(),
+                name=metric,
                 text=[f"{v:.2f}" for v in values],
                 textposition="auto",
+                hovertemplate=f"{metric}: %{{y:.2f}}<extra></extra>",
             )
         )
 
@@ -171,6 +172,7 @@ def plot_evaluation_metrics(results: dict) -> PlotlyFigure:
         legend_title="Metric",
         xaxis_tickangle=45,
         yaxis=dict(range=[0, 1.05]),
+        template="plotly_white",
     )
 
     return fig
