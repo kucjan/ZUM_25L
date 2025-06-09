@@ -3,7 +3,6 @@ import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 import seaborn as sns
-from matplotlib.figure import Figure as MplFigure
 from plotly.graph_objs import Figure as PlotlyFigure
 from sklearn.decomposition import PCA
 from sklearn.metrics import confusion_matrix
@@ -11,7 +10,7 @@ from sklearn.metrics import confusion_matrix
 from config.types import ArrayLike, MatrixLike
 
 
-def plot_confusion_matrix(y_true: ArrayLike, y_pred: ArrayLike) -> MplFigure:
+def plot_confusion_matrix(y_true: ArrayLike, y_pred: ArrayLike) -> None:
     """
     Plots a confusion matrix for one-class classification results using seaborn.
 
@@ -37,7 +36,7 @@ def plot_confusion_matrix(y_true: ArrayLike, y_pred: ArrayLike) -> MplFigure:
     ax.set_xlabel("Predicted")
     ax.set_ylabel("Actual")
     ax.set_title("Confusion Matrix")
-    return fig
+    fig.show()
 
 
 def pca_visualization(
