@@ -15,7 +15,7 @@ from sklearn.tree import DecisionTreeClassifier
 from config.constants import SEED
 
 CLASSIFIERS = [
-    LogisticRegression(solver="lbfgs", max_iter=1000, random_state=SEED),
+    LogisticRegression(solver="lbfgs", max_iter=10000, random_state=SEED),
     RandomForestClassifier(n_estimators=100, max_depth=10, random_state=SEED),
     GradientBoostingClassifier(
         n_estimators=100, learning_rate=0.1, max_depth=3, random_state=SEED
