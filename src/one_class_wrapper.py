@@ -1,3 +1,5 @@
+from typing import Literal
+
 import numpy as np
 import pandas as pd
 from sklearn.base import BaseEstimator, ClassifierMixin
@@ -6,10 +8,9 @@ from sklearn.metrics import confusion_matrix, f1_score, precision_score, recall_
 from sklearn.utils.validation import check_is_fitted
 
 from config.constants import (
-    EXTEND_FACTOR,
-    EXTREME_FACTOR,
-    EXTREME_SCALER,
+    GENERATOR_PARAMS,
     MIN_UNIQUE_NUM_VALUES,
+    OUTLIER_DIRECTION_PROB,
     OUTLIER_RATIO,
     SEED,
 )
@@ -22,25 +23,36 @@ class OneClassWrapper(BaseEstimator, ClassifierMixin):
     def __init__(
         self,
         model: BaseEstimator,
+        outliers_mode: Literal["default", "mahalanobis"] = "default",
         outlier_ratio: float = OUTLIER_RATIO,
-        extend_factor: float = EXTEND_FACTOR,
-        extreme_factor: float = EXTREME_FACTOR,
-        extreme_scaler: int = EXTREME_SCALER,
+        **kwargs,
     ) -> None:
-        """Initializes the OneClassWrapper.
+        """Initializes the OneClassWrapper for one-class classification with synthetic outliers.
 
         Args:
             model (BaseEstimator): A scikit-learn compatible binary classification model.
-            outlier_ratio (float, optional): Ratio of outliers to be added. Defaults to OUTLIER_RATIO.
-            extend_factor (float, optional): Factor by which to extend the outlier value range. Defaults to EXTEND_FACTOR.
-            extreme_factor (float, optional): Determines chances for generating extreme values. Defaults to EXTREME_FACTOR.
-            extreme_scaler (int, optional): Scaling multiplier for generating outlier ranges. Defaults to EXTREME_SCALER.
+            outliers_mode (Literal["default", "mahalanobis"], optional): The method to generate synthetic outliers.
+                                                                           'default' for simple range extension.
+                                                                           'mahalanobis' for Mahalanobis-distance based generation.
+                                                                           Defaults to "default".
+            outlier_ratio (float, optional): The ratio of synthetic outliers to generate relative to the original data size.
+                                             Defaults to OUTLIER_RATIO.
+            **kwargs: Additional parameters specific to the chosen 'outliers_mode'.
+                      These parameters will override defaults in `GENERATOR_PARAMS`.
+                      For `outliers_mode="default"`, parameters include:
+                          - `extend_factor` (float): Factor for extending outlier value range.
+                          - `shrink_factor` (float): Factor for shrinking outlier value range (for the 'other' side).
+                      For `outliers_mode="mahalanobis"`, parameters include:
+                          - `extend_factor` (float): Factor to push points outward from data center.
+                          - `noise_factor` (float): Overall intensity multiplier for added noise.
+                          - `extreme_ratio` (float): Proportion of outliers to make extreme.
+                          - `extreme_extend_scaler` (float): Multiplier for pushing extreme points further.
+                          - `extreme_noise_scaler` (float): Multiplier for heavier noise on extreme points.
         """
         self.model = model
+        self.outliers_mode = outliers_mode
         self.outlier_ratio = outlier_ratio
-        self.extend_factor = extend_factor
-        self.extreme_factor = extreme_factor
-        self.extreme_scaler = extreme_scaler
+        self.gen_params = kwargs if kwargs else GENERATOR_PARAMS[outliers_mode]
 
     def _determine_column_types(self, X: pd.DataFrame) -> dict:
         """Determines whether each column is numerical or categorical.
@@ -62,75 +74,158 @@ class OneClassWrapper(BaseEstimator, ClassifierMixin):
                 col_types[col] = "categorical"
         return col_types
 
-    def _generate_numerical_outliers(
-        self, col: pd.Series, n_samples: int
+    def _generate_mahalanobis_outliers(
+        self,
+        X: pd.DataFrame,
+        n_outliers: int,
     ) -> np.ndarray:
-        """Generates numerical outlier values for a given column.
+        """Generates multivariate outliers based on Mahalanobis distance.
 
         Args:
-            col (pd.Series): Numerical column from the dataset.
-            n_samples (int): Number of outlier samples to generate.
+            X: Input features (numerical DataFrame).
+            n_outliers: Number of outlier samples to generate.
 
         Returns:
             np.ndarray: Array of generated outlier values.
         """
-        min_val, max_val = col.min(), col.max()
-        range_val = max_val - min_val
-        scale = range_val * self.extreme_scaler
+        X_values = X.to_numpy()
+        mean = X_values.mean(axis=0)
+        cov = np.cov(X_values, rowvar=False)
 
-        outliers = np.empty(n_samples)
+        # Generating base outliers using Mahalanobis scaling
+        points = rng.multivariate_normal(mean=mean, cov=cov, size=n_outliers)
+        inv_cov = np.linalg.inv(cov)
+        centered = points - mean
+        distances = np.sqrt(np.sum(centered @ inv_cov * centered, axis=1))
+        median_dist = np.median(distances)
 
-        lower_outliers = rng.uniform(
-            low=min_val - scale,
-            high=min_val + range_val * self.extend_factor,
-            size=n_samples // 2,
-        )
-        upper_outliers = rng.uniform(
-            low=max_val - range_val * self.extend_factor,
-            high=max_val + scale,
-            size=n_samples - (n_samples // 2),
+        outliers = mean + (points - mean) * (
+            self.gen_params["extend_factor"] * median_dist / distances[:, np.newaxis]
         )
 
-        outliers[: len(lower_outliers)] = lower_outliers
-        outliers[len(lower_outliers) :] = upper_outliers
+        # Additional noise
+        noise = rng.normal(
+            scale=np.sqrt(np.diag(cov)) / self.gen_params["noise_factor"],
+            size=outliers.shape,
+        )
+        outliers += noise
 
-        rng.shuffle(outliers)
+        # Including extreme outliers
+        n_extreme = int(n_outliers * self.gen_params["extreme_ratio"])
+        if n_extreme > 0:
+            extreme_idx = np.argpartition(distances, -n_extreme)[-n_extreme:]
+
+            outliers[extreme_idx] = mean + (points[extreme_idx] - mean) * (
+                self.gen_params["extreme_extend_scaler"]
+                * self.gen_params["extend_factor"]
+                * median_dist
+                / distances[extreme_idx, np.newaxis]
+            )
+
+            # Adding heavier noise to extremes
+            outliers[extreme_idx] += rng.normal(
+                scale=self.gen_params["extreme_noise_scaler"]
+                * np.sqrt(np.diag(cov))
+                / self.gen_params["noise_factor"],
+                size=(n_extreme, X_values.shape[1]),
+            )
+
         return outliers
 
+    def _generate_numerical_outliers(
+        self,
+        X: pd.DataFrame,
+        n_outliers: int,
+    ) -> pd.DataFrame:
+        """Generates numerical outlier rows for DataFrame X by perturbing existing rows.
+
+        Args:
+            X: Numerical DataFrame.
+            n_outliers: Number of outlier samples to generate.
+
+        Returns:
+            DataFrame of generated outlier rows.
+        """
+        generated_outliers_data = []
+
+        col_min_vals = X.min()
+        col_max_vals = X.max()
+        col_ranges = col_max_vals - col_min_vals
+
+        num_cols = X.shape[1]
+
+        min_outlier_cols = 1
+
+        for _ in range(n_outliers):
+            base_row = X.iloc[rng.integers(0, len(X))].copy()
+            generated_row = base_row.copy()
+
+            n_outlier_cols_for_this_row = rng.integers(min_outlier_cols, num_cols)
+            outlier_col_indices = rng.choice(
+                num_cols, n_outlier_cols_for_this_row, replace=False
+            )
+            outlier_cols = X.columns[outlier_col_indices]
+
+            for col_name in X.columns:
+                col_min = col_min_vals[col_name]
+                col_max = col_max_vals[col_name]
+                col_range = col_ranges[col_name]
+
+                extend_scaler = col_range * self.gen_params["extend_factor"]
+                shrink_scaler = col_range * self.gen_params["shrink_factor"]
+
+                if col_name in outlier_cols:
+                    if rng.random() < OUTLIER_DIRECTION_PROB:
+                        generated_row[col_name] = rng.uniform(
+                            low=col_max - shrink_scaler,
+                            high=col_max + extend_scaler,
+                        )
+                    else:
+                        generated_row[col_name] = rng.uniform(
+                            low=col_min - extend_scaler,
+                            high=col_min + shrink_scaler,
+                        )
+
+                else:
+                    generated_row[col_name] = rng.uniform(col_min, col_max)
+            generated_outliers_data.append(generated_row)
+
+        return pd.DataFrame(generated_outliers_data, columns=X.columns)
+
     def _generate_categorical_outliers(
-        self, col: pd.Series, n_samples: int
+        self, col: pd.Series, n_outliers: int
     ) -> np.ndarray:
         """Generates categorical outlier values by sampling existing unique values.
 
         Args:
             col (pd.Series): Categorical column from the dataset.
-            n_samples (int): Number of outlier samples to generate.
+            n_outliers (int): Number of outlier samples to generate.
 
         Returns:
             np.ndarray: Array of sampled outlier values.
         """
         unique_vals = col.unique()
         all_options = unique_vals
-        return rng.choice(all_options, size=n_samples)
+        return rng.choice(all_options, size=n_outliers)
 
     def _generate_outliers(self, X: pd.DataFrame) -> pd.DataFrame:
-        """Generates an outlier dataset based on the input features.
-
-        Args:
-            X (pd.DataFrame): Original dataset.
-
-        Returns:
-            pd.DataFrame: Dataset of synthetic outlier samples.
-        """
         n_outliers = int(len(X) * self.outlier_ratio)
         col_types = self._determine_column_types(X)
-        outliers = pd.DataFrame()
-        for col in X.columns:
-            if col_types[col] == "numerical":
-                outliers[col] = self._generate_numerical_outliers(X[col], n_outliers)
-            else:
-                outliers[col] = self._generate_categorical_outliers(X[col], n_outliers)
-        return outliers
+
+        num_cols = [col for col in X.columns if col_types[col] == "numerical"]
+        cat_cols = [col for col in X.columns if col_types[col] == "categorical"]
+
+        numerical_outliers = (
+            self._generate_numerical_outliers(X[num_cols], n_outliers)
+            if self.outliers_mode == "default"
+            else self._generate_mahalanobis_outliers(X, n_outliers)
+        )
+        outlier_df = pd.DataFrame(numerical_outliers, columns=num_cols)
+
+        for col in cat_cols:
+            outlier_df[col] = self._generate_categorical_outliers(X[col], n_outliers)
+
+        return outlier_df
 
     def _prepare_data(self, X: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
         """Combines original data with synthetic outliers and encodes categorical features.
