@@ -32,9 +32,9 @@ class OneClassWrapper(BaseEstimator, ClassifierMixin):
         Args:
             model (BaseEstimator): A scikit-learn compatible binary classification model.
             outliers_mode (Literal["default", "mahalanobis"], optional): The method to generate synthetic outliers.
-                                                                           'default' for simple range extension.
-                                                                           'mahalanobis' for Mahalanobis-distance based generation.
-                                                                           Defaults to "default".
+                                                                        'default' for simple range extension.
+                                                                        'mahalanobis' for Mahalanobis-distance based generation.
+                                                                        Defaults to "default".
             outlier_ratio (float, optional): The ratio of synthetic outliers to generate relative to the original data size.
                                              Defaults to OUTLIER_RATIO.
             **kwargs: Additional parameters specific to the chosen 'outliers_mode'.
