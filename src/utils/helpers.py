@@ -47,7 +47,9 @@ def check_outliers_coverage(
         if num_wrapper_outliers > 0
         else 0.0
     )
-    wrapper_model_covered_ratio = 1 - wrapper_model_uncovered_ratio
+    wrapper_model_covered_ratio = (
+        (1 - wrapper_model_uncovered_ratio) if num_wrapper_outliers > 0 else 0.0
+    )
 
     return {
         "wrapper_outlier_indices": wrapper_outlier_indices,
