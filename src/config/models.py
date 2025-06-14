@@ -33,6 +33,6 @@ CLASSIFIERS = [
 
 ONE_CLASS_CLASSIFIERS = [
     IsolationForest(random_state=SEED),
-    OneClassSVM(gamma="auto"),
+    OneClassSVM(gamma=0.01, nu=0.05),
     LocalOutlierFactor(novelty=True),
 ]
