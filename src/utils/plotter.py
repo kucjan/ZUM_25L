@@ -1,5 +1,8 @@
+from typing import Any, Dict
+
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import seaborn as sns
@@ -8,6 +11,7 @@ from sklearn.decomposition import PCA
 from sklearn.metrics import confusion_matrix
 
 from config.types import ArrayLike, MatrixLike
+from utils.helpers import check_outliers_coverage
 
 
 def plot_confusion_matrix(y_true: ArrayLike, y_pred: ArrayLike) -> None:
@@ -173,5 +177,76 @@ def plot_evaluation_metrics(results: dict) -> PlotlyFigure:
         yaxis=dict(range=[0, 1.05]),
         template="plotly_white",
     )
+
+    return fig
+
+
+def plot_outlier_coverage_comparison(
+    results: Dict[str, Any], oc_preds: np.ndarray
+) -> PlotlyFigure:
+    """
+    Generates a Plotly bar chart comparing outlier coverage metrics for various models
+    against a specified One-Class (OC) model's predictions.
+
+    Args:
+        results (Dict[str, Any]): Aggregated results from model experiments.
+        oc_preds (np.ndarray): Predictions from the One-Class (OC) model (0 for outlier, 1 for inlier).
+
+    Returns:
+        PlotlyFigure: A Plotly bar chart figure.
+    """
+    model_names = []
+    covered_ratios = []
+    wrapper_model_covered_ratios = []
+
+    for model_name, model_data in results.items():
+        model_predictions = model_data["predictions"]
+
+        coverage_metrics = check_outliers_coverage(model_predictions, oc_preds)
+
+        model_names.append(model_name)
+        covered_ratios.append(coverage_metrics["covered_ratio"])
+        wrapper_model_covered_ratios.append(
+            coverage_metrics["wrapper_model_covered_ratio"]
+        )
+
+    plot_data = pd.DataFrame(
+        {
+            "Model": model_names,
+            "Covered Ratio (OC Model outliers covered by Wrapper)": covered_ratios,
+            "Wrapper Covered Ratio (Wrapper outliers covered by OC Model)": wrapper_model_covered_ratios,
+        }
+    )
+
+    plot_data_sorted = plot_data.sort_values(
+        by="Covered Ratio (OC Model outliers covered by Wrapper)", ascending=False
+    )
+
+    plot_data_melted = plot_data_sorted.melt(
+        id_vars="Model", var_name="Metric", value_name="Ratio"
+    )
+
+    fig = px.bar(
+        plot_data_melted,
+        x="Model",
+        y="Ratio",
+        color="Metric",
+        text="Ratio",
+        barmode="group",
+        title="Outlier Coverage Comparison with OC Model",
+        labels={"Ratio": "Coverage Ratio"},
+        height=600,
+        range_y=[0, 1],
+    )
+
+    fig.update_layout(
+        xaxis_title="Model",
+        yaxis_title="Coverage Ratio",
+        xaxis_tickangle=-45,
+        legend_title="Coverage Type",
+        margin=dict(l=0, r=0, t=50, b=0),
+    )
+
+    fig.update_traces(texttemplate="%{y:.2f}", textposition="outside")
 
     return fig
